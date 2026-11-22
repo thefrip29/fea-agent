@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="FEA-Agent: LLM-driven CAE workflows, verified end to end" width="100%">
+  <img src="docs/banner.png" alt="FEA-Agent: LLM-driven CAE workflows, verified end to end" width="100%">
 </p>
 
 <p align="center">
