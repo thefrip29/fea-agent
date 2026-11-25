@@ -1,87 +1,120 @@
-<p align="center">
-  <img src="docs/banner.png" alt="FEA-Agent: LLM-driven CAE workflows, verified end to end" width="100%">
-</p>
+# FEA-Agent
 
-<p align="center">
-  <img src="https://img.shields.io/badge/status-phase_0_complete-38BDF8" alt="phase 0">
-  <img src="https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white" alt="python">
-  <img src="https://img.shields.io/badge/solver-CalculiX_2.21-8B5CF6" alt="calculix">
-  <img src="https://img.shields.io/badge/pytest-phase_1-F59E0B" alt="tests">
-</p>
+![FEA-Agent](docs/banner.png)
 
-<p align="center"><em>An LLM-driven agent for CAE/FEA simulation: generate the model, run the solver,
-parse results, and verify them against physics — because an answer is worthless
-until verifiers have checked it.</em></p>
+> An LLM agent that runs mechanical simulations end to end:
+> geometry → meshing → CalculiX → post-processing,
+> **with verifiers that prove every result.**
+
+## The idea
+
+An LLM can write a CalculiX deck in seconds. The real question is no longer "can it compute?" but "**can it be trusted?**" This project's answer: trust does not come from the model, it comes from **hand-written verifiers** — physics judges (equilibrium, analytic bounds, convergence, sanity) that accept or reject every run with a quantified reason. Around them, three building blocks:
+
+- **verifiers** (Phase 1): the physics judges, each tested against healthy *and* poisoned cases;
+- **harness** (Phase 2): the agent loop — plan → simulate → verify → replan;
+- **benchmark** (Phase 3): verifiable tasks with hand-computed ground truths, up to an RLVR reward model where the training reward is a verifier saying PASS.
+
+## Expected workflow
+
+```mermaid
+flowchart LR
+    T["natural-language brief"] --> CAD["parametric CAD generation"]
+    CAD --> M["Gmsh meshing"]
+    M --> S["CalculiX solve"]
+    S --> R["results .dat / .frd"]
+    R --> V{"college of verifiers"}
+    V -->|PASS| OK["answer + proof"]
+    V -->|FAIL + reason| CAD
+```
+
+## Progress
+
+```text
+Phase 0  Reference study          [████████████████████] 100%  (tag 0.1)
+Phase 1  Verifiers module         [█████████████░░░░░░░]  6/9
+Phase 2  Agent harness            [░░░░░░░░░░░░░░░░░░░░]  0/7
+Phase 3  Dataset & benchmark      [░░░░░░░░░░░░░░░░░░░░]  0/6
+Phase 4  SFT / RLVR (optional)    [░░░░░░░░░░░░░░░░░░░░]  0/6
+```
+
+The detailed plan lives in a private tracker; this README is its public mirror, updated at every step.
+
+## Phase 0 — reference study (tag `0.1`)
+
+Understand the solver and its traps on a textbook case **before** trusting an agent: three-point bending beam, 1000 N, steel 100×100 mm, L = 1 m. A 9-run campaign C3D8 vs C3D8R at increasing mesh densities (nx = 10 → 160), mid-span deflection compared to the Euler-Bernoulli formula (11.9 µm).
+
+![convergence study](docs/convergence.png)
+
+**Lessons** (which became the oracles of the Phase 1 tests):
+
+- **C3D8 shear locking**: a coarse mesh is an over-stiff model (8.84 µm at nx = 10, i.e. −26% vs analytic);
+- **deceptive C3D8R**: seemingly accurate on coarse meshes but non-monotonic — three points would have wrongly concluded "stable";
+- **Euler-Bernoulli is a lower bound**: the converged 3D answer sits ~4.5% above it (shear strain neglected by the theory), reference deflection ≈ **12.4 µm** (last refinement gap < 1%).
+
+## Phase 1 — the verifiers module (in progress)
+
+A college of judges, each tested against healthy cases **and** poisoned cases ("detect, never crash"):
+
+| Verifier | Rule | Example of rejected poison |
+| --- | --- | --- |
+| `equilibrium` | Σ reactions = applied load, relative tolerance | reactions 400 + 500 vs load 1000 |
+| `bounds` | multiplicative band `[ref/1.15 ; ref×1.15]`, two-sided | mm↔m (ratio ×1000), locked mesh (ratio 0.74) |
+| `convergence` | last refinement moves the quantity by < 2% | oscillating series, reversed series |
+| `ccx_io` | parse `.dat` into clean dicts | stray numeric line → `ValueError` with line number |
+| coming | `.frd` (von Mises), orders of magnitude, CLI | wrong units, E in MPa |
+
+Status: **25 tests green**. Oracles are the real Phase 0 numbers (hand-computed or measured), never copies of the code under test.
+
+## Getting started
+
+```bash
+git clone https://github.com/thefrip29/fea-agent
+cd fea-agent
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+python -m pytest -v        # 25 tests: no other dependency required
+```
+
+Re-running the simulations requires `gmsh` and `ccx` (CalculiX); see `scripts/make_beam_inp.py` and `scripts/status.sh`.
+
+## Repository layout
+
+```text
+fea-agent/
+├── solutions/    the answer key: closed-form analytic formulas (3PB bending, tension)
+├── verifiers/    the judges: equilibrium, bounds, convergence + .ccx parser
+├── tests/        the judges of the judges: healthy + poisoned cases
+├── tasks/        (Phase 3) benchmark briefs in YAML
+├── scripts/      parametric deck generator, status snapshot, plots
+└── Output/       Phase 0 runs (not versioned)
+```
+
+## Reports
+
+> One dated report per work session: objective, method, results, proof.
+
+### 2026-11-26 — Judging simulation results
+
+**Objective.** Decide whether a CalculiX result can be trusted *without re-running it*: the trust layer any future agent must pass through.
+
+**Method.** Three hand-written judges, independent from the solver. **Equilibrium**: the reaction sum must match the applied load at relative tolerance. **Analytic bounds**: every quantity must live in the two-sided multiplicative band `[ref/1.15 ; ref×1.15]` around its closed-form reference — far *below* betrays an over-stiff (locked) model, far *above* betrays units or load errors. **Convergence**: a refinement series is accepted only when the last step moves the quantity by less than 2%, and the verdict carries the whole series.
+
+**Results.** 25 tests green. Oracles are the real Phase 0 numbers: the converged run passes, the locked coarse mesh is rejected at 0.74, the mm↔m error at ~×1000, oscillating and reversed series at > 10%. Every verdict carries a quantified reason, readable by a human or an agent. Code: `b58eaae`, `<hash>`, `<hash>`.
+
+**Next.** Parse the `.frd` field data (von Mises), orders-of-magnitude sanity checks, and a single CLI entry point so any run directory gets a PASS/FAIL verdict.
+
+### 2026-11-24 — Data layer and analytic answer key
+
+**Objective.** Give the pipeline its two inputs: clean structures read from the solver output, and an analytic reference to judge against.
+
+**Method.** A state-machine parser for the `.dat` output (known blocks consumed, unknown blocks tolerated, stray numeric lines rejected with their line number) and a library of closed-form formulas (three-point bending, tension) as pure SI functions, validated once against hand computations.
+
+**Results.** 12 tests green against hand-computed oracles (δ = 1.19e-5 m, σ = 1.5 MPa — the Phase 0 numbers); integration on the real campaign run green. Code: `b58eaae`, `be1002e`, `12b973c`.
+
+### 2026-11-22 — Reference campaign closed (tag `0.1`)
+
+**Summary.** 9-run C3D8 vs C3D8R convergence campaign on the textbook beam; reference deflection ≈ 12.4 µm; locking and deceptive-monotonicity lessons now embedded in the tests. Details in the Phase 0 section above.
 
 ---
 
-## Phase 0: pilot run and convergence study
-
-Simply supported steel beam (L = 1 m, 100 x 100 mm section), 1000 N point load at
-mid-span, solved with CalculiX ccx 2.21 (WSL Ubuntu). Analytic references (SI):
-
-- reactions: 500 N per support
-- mid-span deflection (Euler-Bernoulli): 1.190e-5 m
-- max bending stress: 1.5e6 Pa
-
-Sanity checks pass on every run: support reactions sum to 1000 N at machine precision.
-
-### Mesh convergence (deflection, ny = 16, nz = 8)
-
-| element | nx  | deflection (µm) | vs Euler-Bernoulli (11.905) |
-| ------- | --- | --------------- | ---------------------------- |
-| C3D8    | 10  | 8.840           | −25.7% |
-| C3D8    | 20  | 11.208          | −5.9%  |
-| C3D8    | 40  | 12.039          | +1.1%  |
-| C3D8    | 80  | 12.297          | +3.3%  |
-| C3D8    | 160 | 12.389          | +4.1%  |
-| C3D8R   | 10  | 12.119          | +1.8%  |
-| C3D8R   | 20  | 12.424          | +4.4%  |
-| C3D8R   | 40  | 12.584          | +5.7%  |
-| C3D8R   | 80  | 12.722          | +6.9%  |
-
-![C3D8 converges from below toward 12.44 µm; C3D8R crosses the converged value at nx=20 then drifts above it](docs/convergence.png)
-
-*C3D8 converges from below (shear locking, effective order ~1.5); C3D8R crosses the
-converged value at nx=20 — by cancellation of locking and hourglass errors — then drifts
-above it (over-flexibility signature on slender elements). Euler-Bernoulli (dashed) is
-a lower bound at L/h = 10, not the truth: the 3D solution is ~4.5% above the school formula.*
-
-Lessons (they directly shape the verifier library of phase 1):
-
-1. **Fully integrated C3D8 locks in bending.** It converges from below, slowly,
-   dominated by the element count along the length, settling near 12.44 µm.
-2. **Reduced integration C3D8R is erratic.** A 3-point study would have wrongly
-   concluded that C3D8R is excellent; a systematic 9-run series reveals its drift.
-3. **Euler-Bernoulli is a bounded approximation, not the truth.** A verifier that
-   demands "1.19e-5 within 1%" would reject better physics than the formula itself.
-
-### Workflow hygiene, learned the hard way
-
-- result files carry the element type and mesh in their name: no silent overwrites
-- a result is only read if it is fresher than the input that produced it
-- convergence claims need a systematic series, not 3 points
-
-## Layout
-
-    scripts/make_beam_inp.py     parametric 3PB deck generator (nx ny nz, --reduced)
-    scripts/plot_convergence.py  convergence chart from ccx .dat outputs
-    docs/                        banner and figures
-    verifiers/                   (phase 1) physics verification library + pytest
-
-## Try it
-
-    python -m venv .venv && source .venv/bin/activate
-    pip install -r requirements.txt
-    # install the solver: sudo apt install calculix
-    python scripts/make_beam_inp.py 20 16 8 && ccx beam_c3d8_20_16_8
-
-## Roadmap
-
-- Phase 1: verifiers/ — equilibrium, bounds, convergence-rate checks as a tested library
-- Phase 2: Gmsh inputs, quadratic tetrahedra (C3D10), 3D visualization of results
-- Phase 3: LLM loop benchmark — tasks x models x verifiers under identical conditions,
-  cold-start report with verifiable numbers
-
-*Every phase produces commits, tags, figures and honest numbers, produced and
-verified in the open.*
+*Powered by Mistral — banner assembled from a CalculiX FEA render and the Mistral logo.*
