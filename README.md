@@ -31,7 +31,7 @@ flowchart LR
 
 ```text
 Phase 0  Reference study          [████████████████████] 100%  (tag 0.1)
-Phase 1  Verifiers module         [█████████████░░░░░░░]  6/9
+Phase 1  Verifiers module         [█████████████████░░░]  8/9
 Phase 2  Agent harness            [░░░░░░░░░░░░░░░░░░░░]  0/7
 Phase 3  Dataset & benchmark      [░░░░░░░░░░░░░░░░░░░░]  0/6
 Phase 4  SFT / RLVR (optional)    [░░░░░░░░░░░░░░░░░░░░]  0/6
@@ -61,9 +61,10 @@ A college of judges, each tested against healthy cases **and** poisoned cases ("
 | `bounds` | multiplicative band `[ref/1.15 ; ref×1.15]`, two-sided | mm↔m (ratio ×1000), locked mesh (ratio 0.74) |
 | `convergence` | last refinement moves the quantity by < 2% | oscillating series, reversed series |
 | `ccx_io` | parse `.dat` into clean dicts | stray numeric line → `ValueError` with line number |
-| coming | `.frd` (von Mises), orders of magnitude, CLI | wrong units, E in MPa |
+| `cli` | `python -m verifiers run_dir`: one verdict per judge + exit code 0/1 | run box without exactly one `.dat` → `ValueError` |
+| coming | `.frd` (von Mises), orders of magnitude | wrong units, E in MPa |
 
-Status: **25 tests green**. Oracles are the real Phase 0 numbers (hand-computed or measured), never copies of the code under test.
+Status: **31 tests green**. Oracles are the real Phase 0 numbers (hand-computed or measured), never copies of the code under test.
 
 ## Getting started
 
