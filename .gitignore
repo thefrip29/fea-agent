@@ -10,3 +10,5 @@ beam_*.inp
 Output/
 *.egg-info/
 *:Zone.Identifier
+runs/
+runs/
