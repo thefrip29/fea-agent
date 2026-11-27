@@ -71,3 +71,49 @@ def read_dat(path):
     """Parse a CalculiX .dat file from disk."""
     with open(path) as f:
         return parse_dat(f.read())
+def parse_frd(text):
+    """Parse a CalculiX .frd into plain dicts: node coords + result blocks.
+
+    Returns {"nodes": {node: [x, y, z]},
+             "results": {name: {node: [v1, ...]}}}   # e.g. DISP, STRESS, ERROR
+
+    Format lessons from the real phase-0 .frd:
+    - fixed-width records with NO separators: ' -1' + id (10 chars) +
+      values (12 chars each): fields are SLICED, never split();
+    - the '-1' prefix is overloaded THREE ways: node coordinates in the
+      mesh section, element records (narrow integer fields), and result
+      values inside an open block ('-4' opens, '-3' closes). We try to
+      read floats: in the mesh section a failure means "not a coord line"
+      (skipped); inside a result block it is real garbage (raise);
+    - '-5' lines are component descriptors: skipped.
+    """
+    nodes = {}
+    results = {}
+    name = None
+    for n, raw in enumerate(text.splitlines(), start=1):
+        if raw.startswith(" -4"):
+            name = raw[3:13].strip()
+            results[name] = {}
+        elif name is not None and raw.strip() == "-3":
+            name = None
+        elif raw.startswith(" -1"):
+            node = int(raw[3:13])
+            try:
+                vals = [float(raw[i:i + 12]) for i in range(13, len(raw), 12)
+                        if raw[i:i + 12].strip()]
+            except ValueError:
+                if name is None:
+                    continue          # element record, not node coords: skipped
+                raise ValueError(f"frd line {n}: bad value in block {name}: {raw!r}")
+            if name is None:
+                nodes[node] = vals
+            else:
+                results[name][node] = vals
+        # '-5' descriptors and everything else: skipped
+    return {"nodes": nodes, "results": results}
+
+
+def read_frd(path):
+    """Parse a CalculiX .frd file from disk."""
+    with open(path) as f:
+        return parse_frd(f.read())
